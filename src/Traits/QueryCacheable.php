@@ -29,9 +29,16 @@ trait QueryCacheable
     {
         /** @var \Illuminate\Database\Eloquent\Model $this */
         if (isset(static::$flushCacheOnUpdate) && static::$flushCacheOnUpdate) {
-            static::observe(
-                static::getFlushQueryCacheObserver()
-            );
+            // Defer the observer registration to after the framework boots:
+            // static::observe() instantiates the model, which re-enters
+            // bootIfNotBooted(). Laravel 13 throws on re-entry, where Laravel
+            // 12 silently no-op'd. Registering inside app()->booted() means
+            // the model is fully booted by the time observe() runs, so the
+            // re-entry detection is a clean no-op.
+            $class = static::class;
+            app()->booted(function () use ($class) {
+                $class::observe($class::getFlushQueryCacheObserver());
+            });
         }
     }
 
