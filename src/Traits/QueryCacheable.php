@@ -21,6 +21,18 @@ use Rennokki\QueryCache\Query\Builder;
 trait QueryCacheable
 {
     /**
+     * The observable event methods FlushQueryCacheObserver may handle.
+     * Matches Model::getObservableEvents() base set plus pivot events.
+     */
+    private const QUERY_CACHE_OBSERVABLE_EVENTS = [
+        'retrieved', 'creating', 'created', 'updating', 'updated',
+        'saving', 'saved', 'restoring', 'restored', 'replicating',
+        'trashed', 'deleting', 'deleted', 'forceDeleting', 'forceDeleted',
+        'belongsToManyAttached', 'belongsToManyDetached', 'belongsToManyUpdatedExistingPivot',
+        'morphToManyAttached', 'morphToManyDetached', 'morphToManyUpdatedExistingPivot',
+    ];
+
+    /**
      * Boot the trait.
      *
      * @return void
@@ -29,16 +41,17 @@ trait QueryCacheable
     {
         /** @var \Illuminate\Database\Eloquent\Model $this */
         if (isset(static::$flushCacheOnUpdate) && static::$flushCacheOnUpdate) {
-            // Defer the observer registration to after the framework boots:
-            // static::observe() instantiates the model, which re-enters
-            // bootIfNotBooted(). Laravel 13 throws on re-entry, where Laravel
-            // 12 silently no-op'd. Registering inside app()->booted() means
-            // the model is fully booted by the time observe() runs, so the
-            // re-entry detection is a clean no-op.
-            $class = static::class;
-            app()->booted(function () use ($class) {
-                $class::observe($class::getFlushQueryCacheObserver());
-            });
+            // Cannot use static::observe(): it does `new static`, which
+            // re-enters bootIfNotBooted while we are mid-boot. Laravel 13
+            // throws on that re-entry (Laravel 12 silently no-op'd).
+            // Inline registerObserver's event loop instead — registerModelEvent
+            // is pure dispatcher registration, no model instantiation.
+            $observer = static::getFlushQueryCacheObserver();
+            foreach (self::QUERY_CACHE_OBSERVABLE_EVENTS as $event) {
+                if (method_exists($observer, $event)) {
+                    static::registerModelEvent($event, $observer.'@'.$event);
+                }
+            }
         }
     }
 
